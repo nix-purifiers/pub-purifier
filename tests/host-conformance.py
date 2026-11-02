@@ -84,6 +84,8 @@ with tempfile.TemporaryDirectory(prefix='pub-conformance-') as temp:
         run([dart,'pub','get'],cwd=root,env=env)
         assert not list(root.glob('*.nix'))
         if case=='external':
+            run(['nix','build','--impure','--file',temp/'cli/lib/pub-purifier/nix/realize.nix','--argstr','project',root,'--argstr','pubLock',native,'--argstr','lockFile',companion,'--argstr','target','release','--out-link',temp/'release'])
+        if case=='external':
             assert (root/'pubspec.lock').read_bytes()==source_lock and old==source_lock
             assert not (root/'pub-purifier.lock.json').exists()
             assert companion.read_bytes()==original and native.read_bytes()==old

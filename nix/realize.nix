@@ -9,9 +9,9 @@ let
   pkgs = import (builtins.toPath "@nixpkgs@") { };
   purifier = import (builtins.toPath "@purifier@/nix/lib") { inherit (pkgs) lib; };
   args = {
-    src = builtins.toPath project;
-    lockFile = builtins.toPath lockFile;
-    pubLock = builtins.toPath pubLock;
+    src = /. + project;
+    lockFile = /. + lockFile;
+    pubLock = /. + pubLock;
   };
   result = pkgs.callPackage ./build-project.nix { inherit purifier; } args;
 in
