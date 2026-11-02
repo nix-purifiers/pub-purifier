@@ -32,9 +32,10 @@ def stage_manifest(root,destination,native):
         raise ValueError('pub workspaces are not supported yet')
     shutil.copyfile(root/'pubspec.yaml',destination/'pubspec.yaml')
     if (root/'pubspec_overrides.yaml').exists():shutil.copyfile(root/'pubspec_overrides.yaml',destination/'pubspec_overrides.yaml')
-    if native.exists():
+    seed = native if native.exists() else root/'pubspec.lock'
+    if seed.exists():
         try:
-            if isinstance(lock.load_native(native),dict):shutil.copyfile(native,destination/'pubspec.lock')
+            if isinstance(lock.load_native(seed),dict):shutil.copyfile(seed,destination/'pubspec.lock')
         except yaml.YAMLError:pass
 
 def do_lock(root,native,sidecar,names=(),update=False,entries=()):
