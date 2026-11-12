@@ -28,7 +28,7 @@
 }:
 let
   lock = purifier.checkLock (
-    (import ./read-lock.nix { inherit lib; }) { inherit src lockFile pubLock; }
+    (import ../../lib-overlays/default/read-lock.nix { inherit lib; }) { inherit src lockFile pubLock; }
   );
   cache =
     (import ./cache.nix {
