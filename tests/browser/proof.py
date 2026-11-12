@@ -49,7 +49,7 @@ def resolve(repository,index):
     poms=list(repository.rglob('*.pom'));assert len(poms)==1
     pom=ET.parse(poms[0]).getroot();ns={'m':'http://maven.apache.org/POM/4.0.0'}
     group,artifact,version=[pom.find('m:'+k,ns).text for k in ['groupId','artifactId','version']]
-    coordinate=':'.join([group,artifact,version]);project=out/('gradle-'+str(index));project.mkdir()
+    coordinate=':'.join([group,artifact,version]);project=Path.cwd()/('gradle-'+str(index));project.mkdir()
     report=project/'resolved.txt'
     (project/'config.json').write_text(json.dumps(dict(repository=str(repository),coordinate=coordinate,report=str(report))))
     (project/'settings.gradle').write_text("rootProject.name='ordinary-dart-webjar-consumer'\n")
