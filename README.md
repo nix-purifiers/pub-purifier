@@ -171,6 +171,57 @@ pub-purifier publish \
 import-from-derivation. The cache and release are checked with
 `nix build --rebuild`; CI runs on x86_64 and ARM Linux.
 
+### Browser applications and WebJars
+
+Select a Dart web entrypoint and its public assets explicitly:
+
+```nix
+project = pkgs.pub-purifier.buildPubProject {
+  src = ./.;
+  browserTargets.site = {
+    entrypoint = "web/main.dart";
+    target = "javascript"; # or "wasm"
+    assets = {
+      "index.html" = "web/index.html";
+      "style.css" = "web/style.css";
+    };
+    webjar = {
+      groupId = "org.webjars.dart";
+      artifactId = "my-site";
+      version = "1.0.0";
+    };
+  };
+};
+```
+
+`browser.site` and `packages.browser-site` contain the native compiler's
+runtime files and selected assets. JavaScript builds retain `main.js` and
+any deferred-loading JavaScript parts. Wasm builds retain `main.wasm`, its
+native `main.mjs` loader, and generated support files. Wasm uses Dart's
+WasmGC browser runtime and JavaScript loader API; this is not a WASI module.
+Use the compiler-generated loader's `compileStreaming`, `instantiate` and
+`invokeMain` API from your HTML, as shown in the browser test fixtures.
+
+`projections.site.web` provides a static document root and a Java resource
+JAR. Optional `webjar` coordinates also expose `projections.site.maven`
+and `.ivy` for ordinary JVM resolvers. Publication identities incorporate
+the producer, so a changed build gets a distinct coordinate even when its
+declared version stays the same. Resource paths and sidecars are preserved.
+
+The browser builds use the same offline, enforced Pub lock and selected
+Dart SDK as native builds. Public asset paths must stay inside the source
+tree and cannot overwrite compiler output. Compiler metadata lives in the
+separate `browser.site.proof` output. Source files, private configuration,
+Pub caches and source maps are excluded from the public output.
+
+Checks exercise two real producer revisions with a locked `collection`
+dependency and deferred imports. Chromium executes JavaScript and WasmGC
+from the native asset tree, HTTP projection, and a Java HTTP server reading
+an ordinary Gradle-resolved WebJar. Java consumers check exact JAR resource
+origins and hashes. Missing runtime files, native-only FFI entrypoints,
+escaping assets, compiler-file collisions and compiled replacements have
+separate rejection checks.
+
 ## Credits
 
 The purifier idea was inspired by nixcloud's
