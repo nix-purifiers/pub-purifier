@@ -13,7 +13,7 @@ let
     lockFile = /. + lockFile;
     pubLock = /. + pubLock;
   };
-  result = pkgs.callPackage ./build-project.nix { inherit purifier; } args;
+  result = pkgs.callPackage ../pkgs/build-pub-project/default.nix { inherit purifier; } args;
 in
 if target == "cache" then
   result.cache

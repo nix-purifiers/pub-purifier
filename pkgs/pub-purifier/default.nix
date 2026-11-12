@@ -15,12 +15,12 @@
 stdenvNoCC.mkDerivation {
   pname = "pub-purifier";
   version = "0.1.0";
-  src = ../.;
+  src = ../..;
   nativeBuildInputs = [ makeWrapper ];
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/lib/pub-purifier"
-    cp -r pub_purifier nix "$out/lib/pub-purifier/"
+    cp -r pub_purifier nix lib-overlays pkgs "$out/lib/pub-purifier/"
     install -m755 bin/pub-purifier "$out/bin/pub-purifier"
     substituteInPlace "$out/lib/pub-purifier/nix/realize.nix" \
       --replace-fail '@nixpkgs@' '${nixpkgsSrc}' \
