@@ -42,6 +42,11 @@ let
       '';
 in
 {
+  browser = import ./browser.nix { inherit pkgs; };
+  browser-wasm = import ./browser.nix {
+    inherit pkgs;
+    target = "wasm";
+  };
   environment = project.cache;
   package = project.packages.hello;
   offline = project.tests;

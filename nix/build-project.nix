@@ -7,12 +7,14 @@
   gnutar,
   gzip,
   purifier,
+  python3,
 }:
 {
   src,
   lockFile ? src + "/pub-purifier.lock.json",
   pubLock ? src + "/pubspec.lock",
   fetchers ? { },
+  browserTargets ? { },
   srcFilter ?
     path: type:
     !(builtins.elem (baseNameOf path) [
@@ -55,7 +57,7 @@ let
     cd work
     dart pub get --offline --enforce-lockfile --no-example
   '';
-  packages = lib.mapAttrs (
+  nativePackages = lib.mapAttrs (
     name: spec:
     runCommand "pub-${name}" { nativeBuildInputs = [ dart ]; } ''
       ${setup}
@@ -63,6 +65,128 @@ let
       dart compile exe ${lib.escapeShellArg spec.file} -o "$out/bin/${name}"
     ''
   ) lock.outputs;
+  relative =
+    path:
+    builtins.isString path
+    && path != ""
+    && !(lib.hasPrefix "/" path)
+    && !(lib.hasInfix "\\" path)
+    && builtins.all (part: part != "" && part != "." && part != "..") (lib.splitString "/" path);
+  coordinate =
+    value: builtins.isString value && builtins.match "[A-Za-z0-9_][A-Za-z0-9_.-]*" value != null;
+  validTarget =
+    target:
+    builtins.isAttrs target
+    && builtins.all (
+      key:
+      builtins.elem key [
+        "entrypoint"
+        "target"
+        "assets"
+        "webjar"
+      ]
+    ) (builtins.attrNames target)
+    && builtins.elem (target.target or "javascript") [
+      "javascript"
+      "wasm"
+    ]
+    && relative (target.entrypoint or null)
+    && lib.hasSuffix ".dart" target.entrypoint
+    && builtins.isAttrs (target.assets or { })
+    && builtins.all (
+      path:
+      relative path
+      && !(builtins.elem path [
+        "main.js"
+        "main.mjs"
+        "main.wasm"
+        "main.support.js"
+      ])
+      && relative target.assets.${path}
+    ) (builtins.attrNames (target.assets or { }))
+    && (
+      (target.webjar or null) == null
+      || (
+        builtins.isAttrs target.webjar
+        && builtins.all (
+          key:
+          builtins.elem key [
+            "artifactId"
+            "version"
+            "groupId"
+          ]
+        ) (builtins.attrNames target.webjar)
+        && coordinate (target.webjar.artifactId or null)
+        && coordinate (target.webjar.version or null)
+        && coordinate (target.webjar.groupId or "org.webjars.npm")
+      )
+    );
+  validTargets =
+    builtins.isAttrs browserTargets
+    && builtins.all (name: coordinate name && validTarget browserTargets.${name}) (
+      builtins.attrNames browserTargets
+    );
+  browserArtifacts = lib.mapAttrs (
+    name: target:
+    runCommand "pub-browser-${name}"
+      {
+        outputs = [
+          "out"
+          "proof"
+        ];
+        nativeBuildInputs = [
+          dart
+          python3
+        ];
+        spec = builtins.toJSON target;
+        passAsFile = [ "spec" ];
+      }
+      ''
+            ${setup}
+            export SOURCE_DATE_EPOCH=1 TZ=UTC
+            mkdir -p "$TMPDIR/compiled" "$out" "$proof"
+          python3 ${./browser-output.py} validate "$PWD" "$specPath"
+            dart --version > "$proof/compiler-version.txt"
+        ${
+          if (target.target or "javascript") == "wasm" then
+            ''
+              dart compile wasm --no-source-maps ${lib.escapeShellArg target.entrypoint} --output="$TMPDIR/compiled/main.wasm"
+            ''
+          else
+            ''
+              dart compile js -O2 --no-source-maps ${lib.escapeShellArg target.entrypoint} --output="$TMPDIR/compiled/main.js"
+            ''
+        }
+        python3 ${./browser-output.py} "$PWD" "$TMPDIR/compiled" "$specPath" "$out" "$proof" ${dart}
+      ''
+  ) browserTargets;
+  browser = lib.mapAttrs (
+    name: artifact:
+    artifact
+    // {
+      projections =
+        (purifier.resourceProjections {
+          producer = artifact;
+          roots."." = ".";
+          inherit runCommand python3;
+        })
+        // lib.optionalAttrs ((browserTargets.${name}.webjar or null) != null) (
+          purifier.webjarProjections (
+            browserTargets.${name}.webjar
+            // {
+              producer = artifact;
+              assets = artifact;
+              inherit runCommand python3;
+            }
+          )
+        );
+    }
+  ) browserArtifacts;
+  projections = lib.mapAttrs (_: artifact: artifact.projections) browser;
+  browserPackages = lib.mapAttrs' (
+    name: artifact: lib.nameValuePair "browser-${name}" artifact
+  ) browser;
+  packages = nativePackages // browserPackages;
   tests = runCommand "pub-project-tests" { nativeBuildInputs = [ dart ]; } ''
     ${setup}
     ${
@@ -107,11 +231,17 @@ let
           ) (builtins.attrNames packages)}
       '';
 in
+assert lib.assertMsg validTargets
+  "pub-purifier: browserTargets requires named Dart entrypoints, relative public assets and optional explicit WebJar coordinates";
+assert lib.assertMsg (builtins.all (name: !(builtins.hasAttr name nativePackages)) (
+  builtins.attrNames browserPackages
+)) "pub-purifier: browser package collides with a native executable";
 assert
   lock.sdkVersion == dart.version
   || throw "pub-purifier: locked Dart SDK ${lock.sdkVersion} differs from ${dart.version}; override the scope's dart or regenerate the lock with the intended SDK";
 {
   inherit packages tests release;
+  inherit browser projections;
   fetches = lock.entries;
   inherit cache;
 }

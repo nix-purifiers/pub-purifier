@@ -1,0 +1,18 @@
+{
+  "archives": {
+    "collection": "https://pub.dev/api/archives/collection-1.19.1.tar.gz"
+  },
+  "contentHash": "a263e4d05a0782fa27e2de951ef3a27fbf0a4121495c9f155c51be8eedcc5e55",
+  "inputs": {
+    "manifest": "af1bd704c4db900c6a439ab0fefb5aad45391652e65cb5fc1c110ba952c4f2d4",
+    "native": "d2e00e03f6e9d1a4718e86d852883edf5a06a3f52d5becf8e8b0a2368a8efc0e",
+    "overrides": null
+  },
+  "outputs": {
+    "hello": {
+      "file": "bin/hello.dart"
+    }
+  },
+  "sdkVersion": "3.13.0",
+  "version": 1
+}
