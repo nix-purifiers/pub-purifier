@@ -43,6 +43,7 @@ class PathLockTests(unittest.TestCase):
             lambda d:d.update(sdkVersion='3.13.0'),
             lambda d:d.update(pathSources={}),
             lambda d:d.update(version=True),
+            lambda d:d.update(version=2.0),
             lambda d:d['hosted']['demo'].update(sourceTreeHash='a'*64),
             lambda d:d['hosted']['demo'].update(archiveUrl='https://user:pass@example.org/a'),
             lambda d:d['hosted']['demo'].update(sha256='bad'),

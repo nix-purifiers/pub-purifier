@@ -70,6 +70,7 @@ let
         "outputs"
         "contentHash"
       ])
+      || !(builtins.isInt data.version)
       || data.version != 2
     then
       [ "invalid closed version 2 lock" ]
