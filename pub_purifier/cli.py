@@ -18,6 +18,14 @@ def tool(): return os.environ.get('PUB_PURIFIER_DART','dart')
 def read(path):
     try:return json.loads(path.read_text())
     except (ValueError,OSError) as error:raise ValueError(f'cannot read {path}: {error}; {lock.ADVICE}') from error
+def is_path_capture(path):
+    # Lock/update must retain v1's ability to repair a corrupt sidecar.
+    try:
+        data=read(path)
+        return isinstance(data,dict) and data.get('version')==2
+    except ValueError:
+        return False
+
 def write(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.NamedTemporaryFile(mode='w',dir=path.parent,delete=False) as stream:
@@ -163,7 +171,7 @@ def main(argv=None):
     native=Path(args.pub_lock or os.environ.get('PUB_PURIFIER_PUB_LOCK',root/'pubspec.lock')).resolve()
     try:
         if args.command in ('lock','update'):
-            if args.source_root or args.path_source_root or (sidecar.exists() and read(sidecar).get('version')==2):
+            if args.source_root or args.path_source_root or is_path_capture(sidecar):
                 from .path_cli import capture
                 data=capture(root,Path(args.source_root or root).resolve(),args.path_source_root,native,sidecar,tool(),getattr(args,'entry',()),getattr(args,'packages',()),args.command=='update')
                 write(sidecar,data)
