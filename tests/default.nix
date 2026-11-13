@@ -51,13 +51,24 @@ in
   package = project.packages.hello;
   offline = project.tests;
   release = project.release;
-  unit = pkgs.runCommand "pub-unit" { nativeBuildInputs = [ python ]; } ''
-    cp -r ${self} source
-    chmod -R u+w source
-    cd source
-    python -m unittest discover -s tests -v
-    touch "$out"
-  '';
+  unit =
+    pkgs.runCommand "pub-unit"
+      {
+        nativeBuildInputs = [
+          python
+          pkgs.nix
+        ];
+        NIXPKGS_LIB = "${pkgs.path}/lib";
+      }
+      ''
+        cp -r ${self} source
+        chmod -R u+w source
+        cd source
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        python -m unittest discover -s tests -v
+        touch "$out"
+      '';
   conformance-external = pkgs.runCommand "pub-external-locks" { } ''
     test ! -e ${externalSource}/pubspec.lock
     test ! -e ${externalSource}/pub-purifier.lock.json

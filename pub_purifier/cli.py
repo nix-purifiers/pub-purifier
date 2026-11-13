@@ -79,9 +79,13 @@ def do_lock(root,native,sidecar,names=(),update=False,entries=()):
         write(sidecar,data)
     print(f'Locked {len(packages)} Dart packages in {sidecar}')
 
-def prepare(root,native,sidecar,get_args=(),quiet=False):
+def prepare(root,native,sidecar,get_args=(),quiet=False,source_root=None,providers=()):
     data=read(sidecar)
-    if errors:=lock.problems(root,native,data):raise ValueError('\n'.join(errors))
+    path_mode=data.get('version')==2
+    if path_mode:
+        from .hosted import validate
+        validate(data)
+    elif errors:=lock.problems(root,native,data):raise ValueError('\n'.join(errors))
     state=sidecar.parent/'.pub-purifier'/lock.digest(str(root))[:12]
     state.mkdir(parents=True,exist_ok=True)
     for target in ['cache','runtime']:
@@ -98,6 +102,29 @@ def prepare(root,native,sidecar,get_args=(),quiet=False):
     # Pub writes its lock into the selected project, so use a staging manifest
     # and copy only native generated package configuration back. External
     # native locks never need to replace the working tree's pubspec.lock.
+    if path_mode:
+        if get_args:
+            raise ValueError('path-source preparation currently requires ordinary offline pub get')
+        from .materialize import materialize
+        destination=state/'path-runtime'
+        if destination.exists():shutil.rmtree(destination)
+        environment=os.environ.get('PUB_CACHE')
+        os.environ['PUB_CACHE']=str(cache)
+        try:
+            staged=materialize(source_root or root,root,providers,destination,native,sidecar,tool(),state/'materialization.json')
+        finally:
+            if environment is None:os.environ.pop('PUB_CACHE',None)
+            else:os.environ['PUB_CACHE']=environment
+        target=root/'.dart_tool';target.mkdir(exist_ok=True)
+        for name in ['package_config.json','package_graph.json']:
+            if name=='package_config.json':
+                from urllib.parse import urljoin
+                config=json.loads((staged/'.dart_tool'/name).read_text())
+                for package in config['packages']:
+                    package['rootUri']=urljoin((staged/'.dart_tool'/name).as_uri(),package['rootUri'])
+                (target/name).write_text(json.dumps(config,indent=2)+'\n')
+            else:shutil.copyfile(staged/'.dart_tool'/name,target/name)
+        return cache
     with tempfile.TemporaryDirectory(prefix='pub-prepare-') as temp:
         stage=Path(temp);stage_manifest(root,stage,native)
         run([tool(),'pub','get','--offline','--enforce-lockfile','--no-example',*get_args,'--directory',stage],env={**os.environ,'PUB_CACHE':str(cache),'DART_SUPPRESS_ANALYTICS':'true'},stdout=subprocess.DEVNULL if quiet else None)
@@ -119,6 +146,8 @@ def find_root(arguments):
 def main(argv=None):
     parser=argparse.ArgumentParser(prog='pub-purifier')
     parser.add_argument('--lockfile');parser.add_argument('--pub-lock')
+    parser.add_argument('--source-root')
+    parser.add_argument('--path-source-root', action='append', default=[])
     sub=parser.add_subparsers(dest='command',required=True)
     create=sub.add_parser('lock');create.add_argument('--entry',action='append',default=[])
     update=sub.add_parser('update');update.add_argument('packages',nargs='*')
@@ -133,8 +162,14 @@ def main(argv=None):
     native=Path(args.pub_lock or os.environ.get('PUB_PURIFIER_PUB_LOCK',root/'pubspec.lock')).resolve()
     try:
         if args.command in ('lock','update'):
-            do_lock(root,native,sidecar,getattr(args,'packages',()),args.command=='update',getattr(args,'entry',()))
-        elif args.command=='prefetch':print(prepare(root,native,sidecar))
+            if args.source_root or args.path_source_root or (sidecar.exists() and read(sidecar).get('version')==2):
+                from .path_cli import capture
+                data=capture(root,Path(args.source_root or root).resolve(),args.path_source_root,native,sidecar,tool(),getattr(args,'entry',()),getattr(args,'packages',()),args.command=='update')
+                write(sidecar,data)
+                print(f'Captured {len(data["hosted"])} hosted identities in {sidecar}')
+            else:
+                do_lock(root,native,sidecar,getattr(args,'packages',()),args.command=='update',getattr(args,'entry',()))
+        elif args.command=='prefetch':print(prepare(root,native,sidecar,source_root=args.source_root,providers=args.path_source_root))
         elif args.command=='publish':
             prepare(root,native,sidecar)
             with tempfile.TemporaryDirectory(prefix='pub-publish-') as temp:
@@ -161,7 +196,7 @@ def main(argv=None):
                         raise ValueError('locked pub get requires offline resolution; use pub-purifier update to resolve new versions')
                     elif not arg.startswith('--directory='):filtered.append(arg)
                 get_args=filtered
-            cache=prepare(root,native,sidecar,get_args,quiet=command[:2]!=['pub','get'])
+            cache=prepare(root,native,sidecar,get_args,quiet=command[:2]!=['pub','get'],source_root=args.source_root,providers=args.path_source_root)
             if command[:2]==['pub','get']:return 0
             os.environ.update(PUB_CACHE=str(cache),DART_SUPPRESS_ANALYTICS='true')
             os.execv(tool(),[tool(),*command])

@@ -37,7 +37,7 @@ stdenvNoCC.mkDerivation {
         ]
       } \
       --prefix PYTHONPATH : "$out/lib/pub-purifier" \
-      --set PUB_PURIFIER_DART ${dart}/bin/dart \
+      --set-default PUB_PURIFIER_DART ${dart}/bin/dart \
       --set PUB_PURIFIER_REALIZE "$out/lib/pub-purifier/nix/realize.nix" \
       --set-default SSL_CERT_FILE ${cacert}/etc/ssl/certs/ca-bundle.crt
     makeWrapper "$out/bin/pub-purifier" "$out/bin/dart" --add-flags "native --"
