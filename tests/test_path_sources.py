@@ -63,3 +63,16 @@ class SourceTests(unittest.TestCase):
         (state/'pubspec.yaml').write_text('name: previous\ndependencies:\n  missing:\n    path: /outside\n')
         self.stage()
         self.assertFalse((self.base/'stage/0/.pub-purifier').exists())
+
+    def test_inactive_nested_project_is_not_relocated(self):
+        unused=self.owner/'unused';unused.mkdir()
+        (unused/'pubspec.yaml').write_text('name: unused\ndependencies:\n  missing:\n    path: /outside\n')
+        self.stage()
+        self.assertEqual((self.base/'stage/0/unused/pubspec.yaml').read_bytes(),(unused/'pubspec.yaml').read_bytes())
+
+    def test_native_manifest_symlink_is_preserved(self):
+        manifest=self.project/'pubspec.yaml';manifest.rename(self.project/'metadata.yaml');manifest.symlink_to('metadata.yaml')
+        project=self.stage()
+        self.assertTrue((project/'pubspec.yaml').is_symlink())
+        self.assertEqual((project/'pubspec.yaml').resolve(),project/'metadata.yaml')
+        self.assertEqual(yaml.safe_load(manifest.read_text()),self.original)

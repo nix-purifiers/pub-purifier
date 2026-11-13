@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT
 { lib }:
-{ data }:
+{
+  data,
+  native ? null,
+  validateNative ? false,
+}:
 let
   attrs = builtins.isAttrs;
   keys =
@@ -36,6 +40,28 @@ let
     && matches "[A-Za-z0-9_./-]+[.]dart" value.file
     && !(lib.hasPrefix "/" value.file)
     && !(builtins.elem ".." (lib.splitString "/" value.file));
+  seedPackageOK =
+    name:
+    let
+      p = native.packages.${name};
+      d = p.description or { };
+    in
+    matches "[A-Za-z_][A-Za-z0-9_]*" name
+    && attrs p
+    && matches "[0-9][A-Za-z0-9.+-]*" (p.version or null)
+    && attrs d
+    && (
+      if (p.source or null) == "path" then
+        builtins.isString (d.path or null) && d.path != "" && builtins.isBool (d.relative or null)
+      else if (p.source or null) == "hosted" then
+        (d.name or null) == name && urlOK (d.url or null) && matches "[0-9a-f]{64}" (d.sha256 or null)
+      else
+        false
+    );
+  seedOK =
+    attrs native
+    && attrs (native.packages or null)
+    && builtins.all seedPackageOK (builtins.attrNames native.packages);
   problems =
     if
       !(keys data [
@@ -56,6 +82,8 @@ let
       [ "invalid hosted identities" ]
     else if !(attrs outputs) || !(builtins.all outputOK (builtins.attrNames outputs)) then
       [ "invalid output entry points" ]
+    else if validateNative && !seedOK then
+      [ "invalid or missing native seed; only hosted and path sources are supported" ]
     else
       [ ];
   cacheKey =

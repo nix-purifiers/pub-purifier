@@ -83,8 +83,9 @@ def prepare(root,native,sidecar,get_args=(),quiet=False,source_root=None,provide
     data=read(sidecar)
     path_mode=data.get('version')==2
     if path_mode:
-        from .hosted import validate
+        from .hosted import validate,validate_seed
         validate(data)
+        validate_seed(lock.load_native(native))
     elif errors:=lock.problems(root,native,data):raise ValueError('\n'.join(errors))
     state=sidecar.parent/'.pub-purifier'/lock.digest(str(root))[:12]
     state.mkdir(parents=True,exist_ok=True)

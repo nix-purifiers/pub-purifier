@@ -61,3 +61,45 @@ class PathLockTests(unittest.TestCase):
                 result=subprocess.run(['nix-instantiate','--eval','--strict','--json','--expr',expr],capture_output=True,text=True)
                 self.assertEqual(result.returncode,0,result.stderr)
                 self.assertEqual((python_ok,json.loads(result.stdout)==[]),(expected,expected),data)
+
+    def test_native_seed_shape_python_nix_parity(self):
+        nixlib=os.environ.get('NIXPKGS_LIB')
+        if not nixlib:self.skipTest('NIXPKGS_LIB required')
+        source=Path(__file__).resolve().parents[1]
+        valid={'packages':{'oldprovided':{'version':'0.0.1','source':'path','description':{'path':'/unavailable/previous','relative':False}}}}
+        vectors=[(valid,True),(None,False),({},False)]
+        for mutation in (
+            lambda d:d['packages']['oldprovided'].update(source='git'),
+            lambda d:d['packages']['oldprovided']['description'].update(relative='false'),
+            lambda d:d['packages']['oldprovided'].update(version=1),
+        ):
+            value=copy.deepcopy(valid);mutation(value);vectors.append((value,False))
+        with tempfile.TemporaryDirectory() as folder:
+            data_path=Path(folder)/'capture.json';data_path.write_text(json.dumps(self.data))
+            seed=Path(folder)/'seed.json'
+            for value,expected in vectors:
+                try:hosted.validate_seed(value);python_ok=True
+                except (ValueError,TypeError):python_ok=False
+                seed.write_text(json.dumps(value))
+                expr=f"let lib=import {nixlib}; read=import {source}/lib-overlays/default/hosted-lock.nix {{inherit lib;}}; in (read {{data=builtins.fromJSON (builtins.readFile {data_path}); native=builtins.fromJSON (builtins.readFile {seed});validateNative=true;}}).problems"
+                result=subprocess.run(['nix-instantiate','--eval','--strict','--json','--expr',expr],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual((python_ok,json.loads(result.stdout)==[]),(expected,expected),value)
+
+    def test_replay_rejects_bad_seed_before_running_sdk(self):
+        if not os.environ.get('NIXPKGS_LIB'):self.skipTest('NIXPKGS_LIB required')
+        from pub_purifier.materialize import materialize
+        from unittest.mock import patch
+        import yaml
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);capture=root/'capture.json';capture.write_text(json.dumps(self.data));seed=root/'seed.lock'
+            for contents in [None,'{broken',json.dumps({'packages':{'p':{'version':'1.0.0','source':'git','description':{}}}})]:
+                if seed.exists():seed.unlink()
+                if contents is not None:seed.write_text(contents)
+                with patch('pub_purifier.materialize.subprocess.run') as sdk:
+                    with self.assertRaises((ValueError,OSError,yaml.YAMLError)):
+                        materialize(root,root,[],root/'stage',seed,capture,'/unavailable/sdk')
+                    sdk.assert_not_called()
+                expr=f"let lib=import {os.environ['NIXPKGS_LIB']}; read=import {Path(__file__).resolve().parents[1]}/lib-overlays/default/read-lock.nix {{inherit lib;}}; in (read {{src={root};lockFile={capture};pubLock={seed};}}).problems"
+                result=subprocess.run(['nix-instantiate','--eval','--strict','--json','--expr',expr],capture_output=True,text=True)
+                self.assertTrue(result.returncode!=0 or json.loads(result.stdout)!=[],result.stdout)

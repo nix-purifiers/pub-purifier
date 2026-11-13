@@ -66,3 +66,23 @@ def verify_active(data, native):
         if description.get('name') != name or (package.get('version'), description.get('url'), description.get('sha256')) != (identity['version'], identity['registry'], identity['sha256']):
             raise ValueError(name + ': active hosted identity differs from capture')
     return native
+
+
+def validate_seed(native):
+    """Check native input shape without admitting old path observations as pins."""
+    packages=native.get('packages') if isinstance(native,dict) else None
+    if not isinstance(packages,dict):raise ValueError('invalid native seed package map')
+    for name,package in packages.items():
+        if not isinstance(name,str) or not _NAME.fullmatch(name) or not isinstance(package,dict):
+            raise ValueError('invalid native seed package')
+        version=package.get('version');description=package.get('description')
+        if not isinstance(version,str) or not _VERSION.fullmatch(version) or not isinstance(description,dict):
+            raise ValueError('invalid native seed version or description')
+        if package.get('source')=='path':
+            if not isinstance(description.get('path'),str) or not description['path'] or type(description.get('relative')) is not bool:
+                raise ValueError('invalid native seed path description')
+        elif package.get('source')=='hosted':
+            if description.get('name')!=name or not url_ok(description.get('url')) or not isinstance(description.get('sha256'),str) or not _SHA.fullmatch(description['sha256']):
+                raise ValueError('invalid native seed hosted description')
+        else:raise ValueError('unsupported native seed source')
+    return native

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import shutil
 import urllib.request
 from . import hosted, lock
 from .path_sources import stage_sources
@@ -18,6 +19,7 @@ def capture(root, source_root, providers, native, sidecar, dart, entries=(), nam
             hosted.validate(previous)
         elif previous.get('version') != 1 or previous.get('contentHash') != lock.seal(previous)['contentHash']:
             raise ValueError('invalid previous capture')
+    if native.exists():hosted.validate_seed(lock.load_native(native))
     with tempfile.TemporaryDirectory(prefix='pub-path-capture-') as folder:
         staged = stage_sources(source_root, root, providers, Path(folder)/'sources', native)
         subprocess.run([str(dart), 'pub', 'upgrade' if update else 'get', *names,
@@ -52,4 +54,14 @@ def capture(root, source_root, providers, native, sidecar, dart, entries=(), nam
         hosted.verify_active(data, resolved)
         # Existing authored locks remain seeds. Newly captured source locations
         # belong to the temporary stage, so never publish that lock as input.
+        created=not native.exists()
+        if created:
+            native.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(staged/'pubspec.lock',native)
+        receipt=sidecar.parent/'.pub-purifier/capture-receipt.json'
+        receipt.parent.mkdir(parents=True,exist_ok=True)
+        receipt.write_text(json.dumps({'nativeSeedCreated':created,'nativeSeedPath':str(native),
+            'nativeSeedSha256':lock.file_hash(native),'nativeAuthoredStageLockSha256':lock.file_hash(staged/'pubspec.lock'),
+            'portableContentHash':data['contentHash']},sort_keys=True,indent=2)+'\n')
+        if created:print(f'Native seed authored at {native}; receipt: {receipt}')
         return data

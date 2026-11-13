@@ -26,6 +26,7 @@ def source_files(root):
 
 def materialize(source_root, project, providers, destination, native, capture, dart, receipt=None):
     data = hosted.validate(json.loads(Path(capture).read_text()))
+    hosted.validate_seed(lock.load_native(native))
     owners=[Path(source_root).resolve(),*[Path(p).resolve() for p in providers]]
     original=[source_files(owner) for owner in owners]
     seed_hash=lock.file_hash(native) if Path(native).exists() else None
@@ -89,21 +90,42 @@ def materialize(source_root, project, providers, destination, native, capture, d
     for spec in data['outputs'].values():
         if not (staged / spec['file']).is_file():
             raise ValueError('output entry point is missing after materialization')
+    deps_result=subprocess.run([str(dart),'pub','deps','--json'],cwd=staged,env=environment,check=True,capture_output=True,text=True)
+    dependency_graph=json.loads(deps_result.stdout)
+    graph_packages=dependency_graph.get('packages')
+    if dependency_graph.get('root')!=root_name or not isinstance(graph_packages,list):
+        raise ValueError('invalid native dependency graph')
+    graph_names=[package.get('name') for package in graph_packages]
+    if len(graph_names)!=len(set(graph_names)) or set(graph_names)!=seen:
+        raise ValueError('native dependency graph differs from configured packages')
+    for package in graph_packages:
+        name=package['name'];entry=final['packages'].get(name)
+        if entry and (package.get('version'),package.get('source'))!=(entry['version'],entry['source']):
+            raise ValueError('native dependency graph identity differs from lock')
+        edges=package.get('dependencies')
+        if not isinstance(edges,list) or not all(isinstance(edge,str) and edge in seen for edge in edges):
+            raise ValueError('native dependency graph contains an unbound edge')
     joins=[]
     for index, (owner, files) in enumerate(zip(owners, original)):
         if source_files(owner)!=files:
             raise ValueError('original source input changed during native materialization')
         target=Path(destination)/str(index)
         joined=[]
+        manifest_targets={(target/key).resolve() for key in files if Path(key).name in ('pubspec.yaml','pubspec_overrides.yaml')}
         for relative, entry in files.items():
             path=target/relative
             if 'link' in entry:
                 if not path.is_symlink():raise ValueError('source symlink type changed')
+                expected=(owner/relative).resolve(strict=True)
+                expected=target/expected.relative_to(owner)
+                if path.resolve(strict=True)!=expected.resolve(strict=True):
+                    raise ValueError('source symlink target changed')
+                joined.append({'file':relative,**entry,'stagedLink':os.readlink(path)})
                 continue
             if relative=='pubspec.lock' or path.name=='pubspec.lock':continue
             if path.stat().st_mode & 0o777 != entry['mode']:
                 raise ValueError('source file mode changed')
-            if path.name in ('pubspec.yaml','pubspec_overrides.yaml'):
+            if path.resolve() in manifest_targets and lock.file_hash(path)!=entry['sha256']:
                 before=lock.load_native(owner/relative);after=lock.load_native(path)
                 for section in ('dependencies','dev_dependencies','dependency_overrides'):
                     for name,spec in before.get(section,{}).items():
@@ -118,7 +140,7 @@ def materialize(source_root, project, providers, destination, native, capture, d
         raise ValueError('original native lock changed during materialization')
     if receipt:
         Path(receipt).write_text(json.dumps({'sourceJoins':joins,'nativeSeedSha256':seed_hash,
-            'activeNativeGraph':final,'portableContentHash':data['contentHash'],
+            'nativeLock':final,'activeNativeGraph':dependency_graph,'portableContentHash':data['contentHash'],
             'sdkVersionObservation':subprocess.run([str(dart),'--version'],check=True,capture_output=True,text=True).stdout.strip()},sort_keys=True,indent=2)+'\n')
     return staged
 

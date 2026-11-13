@@ -64,37 +64,49 @@ def stage_sources(source_root, project, providers, destination, native):
                     if os.path.isabs(link):
                         entry.unlink()
                         entry.symlink_to(relocated(source.resolve(strict=True)))
-    for owner, target in zip(owners, copies):
-        for base, directories, files in os.walk(owner, followlinks=False):
-            directories[:] = [d for d in directories if not (Path(base)/d).is_symlink() and d not in {'.git', '.dart_tool', '.pub-purifier'}]
-            for filename in ('pubspec.yaml', 'pubspec_overrides.yaml'):
-                original = Path(base) / filename
-                if filename not in files:
-                    continue
-                declaration = yaml.safe_load(original.read_text())
-                if not isinstance(declaration, dict):
-                    raise ValueError('invalid native manifest')
-                if 'workspace' in declaration or declaration.get('resolution') == 'workspace':
-                    raise ValueError('Pub workspaces require a separate contract')
-                changed = False
-                for section in ('dependencies', 'dev_dependencies', 'dependency_overrides'):
-                    entries = declaration.get(section, {})
-                    if not isinstance(entries, dict):
-                        raise ValueError('invalid dependency map')
-                    for name, spec in entries.items():
-                        if not isinstance(spec, dict) or 'path' not in spec:
-                            continue
-                        if not isinstance(spec['path'], str):
-                            raise ValueError('invalid native path dependency')
-                        resolved = provided[name] if name in provided else (original.parent / spec['path']).resolve(strict=True)
-                        spec['path'] = os.path.relpath(relocated(resolved), target / original.parent.relative_to(owner))
-                        changed = True
-                if changed:
-                    output = (target / original.relative_to(owner)).resolve(strict=True)
-                    mode = original.stat().st_mode & 0o777
-                    output.unlink()
-                    output.write_text(yaml.safe_dump(declaration, sort_keys=False))
-                    os.chmod(output, mode)
+    overrides = {}
+    for filename in ('pubspec.yaml','pubspec_overrides.yaml'):
+        path=project/filename
+        if path.exists():
+            declaration=yaml.safe_load(path.read_text())
+            if isinstance(declaration,dict):overrides.update(declaration.get('dependency_overrides',{}))
+    pending=[project]
+    visited=set()
+    while pending:
+        package=pending.pop()
+        if package in visited:continue
+        visited.add(package)
+        owner,target=next((a,b) for a,b in zip(owners,copies) if within(package,a))
+        for filename in ('pubspec.yaml','pubspec_overrides.yaml'):
+            original=package/filename
+            if filename=='pubspec_overrides.yaml' and package!=project:continue
+            if not original.exists():
+                if filename=='pubspec.yaml':raise ValueError('missing active native manifest')
+                continue
+            declaration=yaml.safe_load(original.read_text())
+            if not isinstance(declaration,dict):raise ValueError('invalid native manifest')
+            if 'workspace' in declaration or declaration.get('resolution')=='workspace':
+                raise ValueError('Pub workspaces require a separate contract')
+            changed=False
+            sections=('dependencies','dev_dependencies','dependency_overrides') if package==project else ('dependencies',)
+            for section in sections:
+                entries=declaration.get(section,{})
+                if not isinstance(entries,dict):raise ValueError('invalid dependency map')
+                for name,spec in entries.items():
+                    if section!='dependency_overrides' and name in overrides:continue
+                    if not isinstance(spec,dict) or 'path' not in spec:continue
+                    if not isinstance(spec['path'],str):raise ValueError('invalid native path dependency')
+                    resolved=provided[name] if name in provided else (original.parent/spec['path']).resolve(strict=True)
+                    selected=relocated(resolved)
+                    pending.append(resolved)
+                    spec['path']=os.path.relpath(selected,target/original.parent.relative_to(owner))
+                    changed=True
+            if changed:
+                output=(target/original.relative_to(owner)).resolve(strict=True)
+                mode=original.stat().st_mode & 0o777
+                output.unlink()
+                output.write_text(yaml.safe_dump(declaration,sort_keys=False))
+                os.chmod(output,mode)
     staged = copies[0] / project.relative_to(owners[0])
     if Path(native).exists():
         output = staged / 'pubspec.lock'
