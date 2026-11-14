@@ -226,3 +226,30 @@ separate rejection checks.
 
 The purifier idea was inspired by nixcloud's
 [cargo (libnix)](https://github.com/nixcloud/cargo).
+
+Path dependencies can use an explicit version 2 hosted capture. Run from the
+Dart project directory, declaring its enclosing source tree and each provided
+package root:
+
+```sh
+pub-purifier --source-root .. --path-source-root /path/to/thrift/lib/dart lock
+pub-purifier --source-root .. --path-source-root /path/to/thrift/lib/dart native -- run bin/main.dart
+```
+
+The Nix constructor accepts `projectDir` within `src` and
+`pathSources = [ { src = selectedThriftSource; root = "lib/dart"; } ];`.
+Each provided package takes its name and version from its actual native
+`pubspec.yaml`. These are current source inputs, rather than source pins stored
+in the hosted download capture. Native path fields are relocated in temporary
+copies; other dependency constraints and existing overrides are preserved.
+Workspaces require a separate contract and are rejected.
+
+The closed version 2 capture contains only `version`, `hosted`, `outputs`, and
+`contentHash`. Each hosted entry contains its native `version`, `registry`,
+`sha256`, and `archiveUrl`. Unused captured packages may remain. Every active
+hosted identity must match a capture; adding or changing one requires an
+explicit capture/update. The selected Dart SDK resolves offline and authors a
+temporary lock, which is then checked with `--enforce-lockfile`. The original
+native lock is retained as an unchanged seed. SDK version observations and
+provided source receipts are derived build evidence, not portable admission
+pins. Existing version 1 hosted-only projects retain their existing behavior.
